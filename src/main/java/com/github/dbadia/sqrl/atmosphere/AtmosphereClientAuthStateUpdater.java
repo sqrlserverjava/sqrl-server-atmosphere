@@ -2,6 +2,8 @@ package com.github.dbadia.sqrl.atmosphere;
 
 import java.io.IOException;
 
+import javax.servlet.http.Cookie;
+
 import org.atmosphere.config.service.AtmosphereHandlerService;
 import org.atmosphere.cpr.AtmosphereHandler;
 import org.atmosphere.cpr.AtmosphereRequest;
@@ -18,6 +20,7 @@ import com.github.dbadia.sqrl.server.SqrlAuthenticationStatus;
 import com.github.dbadia.sqrl.server.SqrlConfig;
 import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
 
+// TODO: rename /sqrlauthpolling
 @AtmosphereHandlerService(path = "/sqrlauthwebsocket", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, ClientAuthStateUpdater {
 	private final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
@@ -56,24 +59,29 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 
 			if (request.getMethod().equalsIgnoreCase("GET")) {
 				// GET is a polling request; suspend it until we are ready to respond
-				logger.info("onRequest {} {} {} {}", request.getMethod(), atmosphereSessionId,
-						resource.uuid(), request.getHeader("User-Agent"));
+				if (logger.isInfoEnabled()) {
+					logger.info("onRequest {} {} {} {} {}", request.getMethod(), atmosphereSessionId, resource.uuid(),
+							toString(request.getCookies()), request.getHeader("User-Agent"));
+				}
 				// TODO: handle the case where the client retries
 				// sqrlAuthStateMonitor.getCurrentStateForSessionId(atmosphereSessionId);
 				resource.suspend();
 				updateCurrentAtomosphereRequest(resource);
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
 				// Post means we're being sent data
-				final String message = request.getReader().readLine().trim();
-				logger.info("onRequest {} {} {} {} {}", request.getMethod(), atmosphereSessionId,
-						resource.uuid(), message, request.getHeader("User-Agent"));
+				final String message = request.getReader().readLine().trim(); // TODO: no trim and better parser
+				if (logger.isInfoEnabled()) {
+					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), atmosphereSessionId,
+							resource.uuid(), message, toString(request.getCookies()),
+							request.getHeader("User-Agent"));
+				}
 				// Simple JSON message { "correlator" : "XYZ", "status" : "CORRELATOR_ISSUED" }
 				correlatorString = message.substring(message.indexOf(':') + 2, message.indexOf(',') - 1);
 				final String browserStatusString = message.substring(message.lastIndexOf(':') + 2, message.length() - 2);
 
 				if ("redirect".equals(browserStatusString)) {
 					// The browser received the complete update and is redirecting, clean up
-					sqrlAuthStateMonitor.stopMonitoringCorrelator(atmosphereSessionId);
+					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorString);
 				} else {
 					SqrlAuthenticationStatus browserStatus = null;
 					SqrlAuthenticationStatus newStatus = null;
@@ -117,7 +125,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 			final SqrlAuthenticationStatus oldAuthStatus, final SqrlAuthenticationStatus newAuthStatus) {
 		final AtmosphereResource resource = currentAtmosphereRequestTable.get(atmosphereSessionId);
 		if (resource == null) {
-			logger.warn("AtmosphereResource not found for sessionId {}, can't communicate status change from {} to {}",
+			logger.error("AtmosphereResource not found for sessionId {}, can't communicate status change from {} to {}",
 					atmosphereSessionId, oldAuthStatus, newAuthStatus);
 			return;
 		}
@@ -194,5 +202,14 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	@Override
 	public void destroy() {
 		// Nothing to do
+	}
+
+	private static final String toString(final Cookie[] cookieArray) {
+		final StringBuilder buf = new StringBuilder("C[ ");
+		for (final Cookie cookie : cookieArray) {
+			buf.append(cookie.getName()).append("=").append(cookie.getValue()).append(", ");
+		}
+
+		return buf.substring(0, buf.length() - 2) + " ]";
 	}
 }
