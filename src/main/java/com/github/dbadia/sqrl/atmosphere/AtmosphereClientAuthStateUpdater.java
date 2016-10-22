@@ -36,7 +36,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	 */
 	private static SelfExpiringHashMap<String, AtmosphereResource> currentAtmosphereRequestTable;
 	private static SqrlAuthStateMonitor sqrlAuthStateMonitor = null;
-	private static String sqrlCookieName = null; // TODO: reame to sqrlCorrelatorCookieName
+	private static String sqrlCorrelatorCookieName = null;
 
 	@Override
 	public void initSqrl(final SqrlConfig sqrlConfig, final SqrlAuthStateMonitor sqrlAuthStateMonitor) {
@@ -45,7 +45,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(millisToExpire);
 		}
 		AtmosphereClientAuthStateUpdater.sqrlAuthStateMonitor = sqrlAuthStateMonitor;
-		AtmosphereClientAuthStateUpdater.sqrlCookieName = sqrlConfig.getCorrelatorCookieName();
+		AtmosphereClientAuthStateUpdater.sqrlCorrelatorCookieName = sqrlConfig.getCorrelatorCookieName();
 	}
 
 	/**
@@ -198,7 +198,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 		}
 
 		for (final Cookie cookie : resource.getRequest().getCookies()) {
-			if (sqrlCookieName.equals(cookie.getName())) {
+			if (sqrlCorrelatorCookieName.equals(cookie.getName())) {
 				return cookie.getValue();
 			}
 		}
