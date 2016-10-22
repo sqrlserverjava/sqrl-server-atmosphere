@@ -44,8 +44,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 			final long millisToExpire = TimeUnit.MINUTES.toMillis(sqrlConfig.getNutValidityInSeconds());
 			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(millisToExpire);
 		}
-		this.sqrlAuthStateMonitor = sqrlAuthStateMonitor;
-		this.sqrlCookieName = sqrlConfig.getCorrelatorCookieName();
+		AtmosphereClientAuthStateUpdater.sqrlAuthStateMonitor = sqrlAuthStateMonitor;
+		AtmosphereClientAuthStateUpdater.sqrlCookieName = sqrlConfig.getCorrelatorCookieName();
 	}
 
 	/**
@@ -65,8 +65,6 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 					logger.info("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
 							toString(request.getCookies()), request.getHeader("User-Agent"));
 				}
-				// TODO: handle the case where the client retries
-				// sqrlAuthStateMonitor.getCurrentStateForSessionId(atmosphereSessionId);
 				resource.suspend();
 				updateCurrentAtomosphereRequest(resource);
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
@@ -116,7 +114,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 			}
 		} catch (final Exception e) {
 			// Trap all exceptions here because we don't know what will happen if they bubble up to the atmosphere
-			// framework
+			// framework... it may kill an important thread or otherwise
 			logger.error(new StringBuilder("Error processing atmosphere request for correlator=")
 					.append(correlatorId).toString(), e);
 		}
@@ -146,7 +144,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 					break;
 				case WEBSOCKET:
 					break;
-				case SSE: // this is not in the original examples but is necessary for SSE
+				case SSE: // flush() is not in the original examples but is necessary for SSE
 				case STREAMING:
 					response.getWriter().flush();
 					break;
@@ -171,12 +169,12 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	 *            the atmosphere resource that was received
 	 */
 	public void updateCurrentAtomosphereRequest(final AtmosphereResource resource) {
-		final String atmosphereSessionId = extractCorrelatorFromCookie(resource); // TODO: rename to correaltorId
-		if (logger.isDebugEnabled()) {
-			logger.debug("In updateCurrentAtomosphereRequest for atmosphereSessionId {}, update? {}",
-					atmosphereSessionId, currentAtmosphereRequestTable.containsKey(atmosphereSessionId));
+		final String correaltorId = extractCorrelatorFromCookie(resource); // TODO: rename to correaltorId
+		if (logger.isTraceEnabled()) {
+			logger.trace("In updateCurrentAtomosphereRequest for correaltorId {}, update? {}",
+					correaltorId, currentAtmosphereRequestTable.containsKey(correaltorId));
 		}
-		currentAtmosphereRequestTable.put(atmosphereSessionId, resource);
+		currentAtmosphereRequestTable.put(correaltorId, resource);
 	}
 
 	@Override
