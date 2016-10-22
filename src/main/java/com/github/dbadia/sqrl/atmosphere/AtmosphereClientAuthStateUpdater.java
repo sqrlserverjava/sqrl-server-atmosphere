@@ -1,6 +1,7 @@
 package com.github.dbadia.sqrl.atmosphere;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 import javax.servlet.http.Cookie;
 
@@ -23,26 +24,28 @@ import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
 // TODO: rename /sqrlauthpolling
 @AtmosphereHandlerService(path = "/sqrlauthwebsocket", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, ClientAuthStateUpdater {
-	private final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
+	private static final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
 
 	/**
-	 * Table of atmosphere sessionId to most current AtmosphereResource request object. This is necessary as certain
-	 * polling mechanisms, such as long polling can timeout and result in subsequent requests. This ensure we send our
-	 * reply to the current request instead of a stale one.
+	 * Table of correlator cookie to most current AtmosphereResource request object. This is necessary as certain
+	 * polling mechanisms, such as long polling can timeout and result in subsequent atmosphere requests. This ensures
+	 * we send our reply to the current atmosphere connection instead of a stale one.
 	 *
 	 * We use {@link SelfExpiringHashMap} so that old entries get removed automatically. We keep this as a static as
 	 * it's possible the atmosphere will create multiple instances of this class
 	 */
 	private static SelfExpiringHashMap<String, AtmosphereResource> currentAtmosphereRequestTable;
 	private static SqrlAuthStateMonitor sqrlAuthStateMonitor = null;
+	private static String sqrlCookieName = null; // TODO: reame to sqrlCorrelatorCookieName
 
 	@Override
 	public void initSqrl(final SqrlConfig sqrlConfig, final SqrlAuthStateMonitor sqrlAuthStateMonitor) {
 		if (currentAtmosphereRequestTable == null) {
-			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(
-					sqrlConfig.getNutValidityInSeconds());
+			final long millisToExpire = TimeUnit.MINUTES.toMillis(sqrlConfig.getNutValidityInSeconds());
+			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(millisToExpire);
 		}
 		this.sqrlAuthStateMonitor = sqrlAuthStateMonitor;
+		this.sqrlCookieName = sqrlConfig.getCorrelatorCookieName();
 	}
 
 	/**
@@ -51,16 +54,15 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	 */
 	@Override
 	public void onRequest(final AtmosphereResource resource) {
-		String correlatorString = null;
-		String atmosphereSessionId = null;
+		String correlatorId = null;
 		try {
 			final AtmosphereRequest request = resource.getRequest();
-			atmosphereSessionId = extractAtmosphereSessionId(resource);
+			correlatorId = extractCorrelatorFromCookie(resource);
 
 			if (request.getMethod().equalsIgnoreCase("GET")) {
 				// GET is a polling request; suspend it until we are ready to respond
 				if (logger.isInfoEnabled()) {
-					logger.info("onRequest {} {} {} {} {}", request.getMethod(), atmosphereSessionId, resource.uuid(),
+					logger.info("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
 							toString(request.getCookies()), request.getHeader("User-Agent"));
 				}
 				// TODO: handle the case where the client retries
@@ -71,22 +73,26 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 				// Post means we're being sent data
 				final String message = request.getReader().readLine().trim(); // TODO: no trim and better parser
 				if (logger.isInfoEnabled()) {
-					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), atmosphereSessionId,
+					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), correlatorId,
 							resource.uuid(), message, toString(request.getCookies()),
 							request.getHeader("User-Agent"));
 				}
 				// Simple JSON message { "correlator" : "XYZ", "status" : "CORRELATOR_ISSUED" }
-				correlatorString = message.substring(message.indexOf(':') + 2, message.indexOf(',') - 1);
+				final String correlatorMessageString = message.substring(message.indexOf(':') + 2,
+						message.indexOf(',') - 1);
+				if (!correlatorMessageString.equals(correlatorId)) {
+					logger.error("Mismatch between atomsphere correlator param and cookie");
+				}
 				final String browserStatusString = message.substring(message.lastIndexOf(':') + 2, message.length() - 2);
 
 				if ("redirect".equals(browserStatusString)) {
 					// The browser received the complete update and is redirecting, clean up
-					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorString);
+					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 				} else {
 					SqrlAuthenticationStatus browserStatus = null;
 					SqrlAuthenticationStatus newStatus = null;
-					if (correlatorString == null) {
-						logger.warn("Browser {} sent null correlator {}", atmosphereSessionId, message);
+					if (correlatorId == null) {
+						logger.warn("Browser {} sent null correlator {}", correlatorId, message);
 						newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
 					}
 
@@ -94,18 +100,17 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 						browserStatus = SqrlAuthenticationStatus.valueOf(browserStatusString);
 						// Set them the same so, by default we will query the db
 					} catch (final RuntimeException e) {
-						logger.warn("Browser {} sent invalid status {}", atmosphereSessionId, message);
+						logger.warn("Browser {} sent invalid status {}", correlatorId, message);
 						newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
 					}
 					if (newStatus != null) {
 						// Error state, send the reply right away
-						pushStatusUpdateToBrowser(resource.uuid(), browserStatus, newStatus);
+						pushStatusUpdateToBrowser(correlatorId, browserStatus, newStatus);
 					} else if (sqrlAuthStateMonitor == null) {
 						logger.error("init error, sqrlAuthStateMonitor is null, can't monitor correlator for change");
 					} else {
 						// Let the monitor watch the db for correlator change, then send the reply when it changes
-						sqrlAuthStateMonitor.monitorCorrelatorForChange(atmosphereSessionId, correlatorString,
-								browserStatus);
+						sqrlAuthStateMonitor.monitorCorrelatorForChange(correlatorId, browserStatus);
 					}
 				}
 			}
@@ -113,7 +118,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 			// Trap all exceptions here because we don't know what will happen if they bubble up to the atmosphere
 			// framework
 			logger.error(new StringBuilder("Error processing atmosphere request for correlator=")
-					.append(correlatorString).append(", sessionId=").append(atmosphereSessionId).toString(), e);
+					.append(correlatorId).toString(), e);
 		}
 	}
 
@@ -121,17 +126,17 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	 * Invoked by {@link SqrlAuthStateMonitor} when it is time to respond to a browsers polling request with an update
 	 */
 	@Override
-	public void pushStatusUpdateToBrowser(final String atmosphereSessionId,
+	public void pushStatusUpdateToBrowser(final String correlatorId,
 			final SqrlAuthenticationStatus oldAuthStatus, final SqrlAuthenticationStatus newAuthStatus) {
-		final AtmosphereResource resource = currentAtmosphereRequestTable.get(atmosphereSessionId);
+		final AtmosphereResource resource = currentAtmosphereRequestTable.get(correlatorId);
 		if (resource == null) {
-			logger.error("AtmosphereResource not found for sessionId {}, can't communicate status change from {} to {}",
-					atmosphereSessionId, oldAuthStatus, newAuthStatus);
+			logger.error("AtmosphereResource not found for correlator {}, can't communicate status change from {} to {}",
+					correlatorId, oldAuthStatus, newAuthStatus);
 			return;
 		}
 		final AtmosphereResponse response = resource.getResponse();
 		logger.info("Sending atmosphere state change from {} to  {} via {} to {}, ", oldAuthStatus, newAuthStatus,
-				resource.transport(), atmosphereSessionId);
+				resource.transport(), correlatorId);
 		try {
 			response.getWriter().write(newAuthStatus.toString());
 			switch (resource.transport()) {
@@ -147,12 +152,12 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 					break;
 				default:
 					// This appears to be legit for some transports, just do a debug log
-					logger.debug("No action taken to flush response for transport {} for atmosphereSessionId {}",
-							resource.transport(), atmosphereSessionId);
+					logger.debug("No action taken to flush response for transport {} for correaltor {}",
+							resource.transport(), correlatorId);
 			}
 		} catch (final Exception e) {
 			logger.error(new StringBuilder("Caught IO error trying to send status of ").append(newAuthStatus)
-					.append(" via atmosphere to atmosphereSessionId ").append(atmosphereSessionId)
+					.append(" via atmosphere to correaltor ").append(correlatorId)
 					.append(" with transport ").append(resource.transport()).toString(), e);
 		}
 	}
@@ -166,7 +171,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	 *            the atmosphere resource that was received
 	 */
 	public void updateCurrentAtomosphereRequest(final AtmosphereResource resource) {
-		final String atmosphereSessionId = extractAtmosphereSessionId(resource);
+		final String atmosphereSessionId = extractCorrelatorFromCookie(resource); // TODO: rename to correaltorId
 		if (logger.isDebugEnabled()) {
 			logger.debug("In updateCurrentAtomosphereRequest for atmosphereSessionId {}, update? {}",
 					atmosphereSessionId, currentAtmosphereRequestTable.containsKey(atmosphereSessionId));
@@ -184,18 +189,32 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 		}
 	}
 
+	private static String extractCorrelatorFromCookie(final AtmosphereResource resource) {
+		if (resource.getRequest() == null) {
+			logger.error("Couldn't extract correlator from cookie since atmosphere request was null");
+			return null;
+		}
+		if (resource.getRequest().getCookies() == null) {
+			logger.error("Couldn't extract correlator from cookie since atmosphere request.getCookies() was null");
+			return null;
+		}
 
-	private static String extractAtmosphereSessionId(final AtmosphereResource resource) {
-		return resource.getRequest().getRequestedSessionId();
+		for (final Cookie cookie : resource.getRequest().getCookies()) {
+			if (sqrlCookieName.equals(cookie.getName())) {
+				return cookie.getValue();
+			}
+		}
+		logger.error("Couldn't extract correlator from cookie; cookie not found in atmosphere request.getCookies()");
+		return null;
 	}
 
 	public void onDisconnect(final AtmosphereResponse response) throws IOException {
 		final AtmosphereResourceEvent event = response.resource().getAtmosphereResourceEvent();
-		final String atmosphereSessionId = extractAtmosphereSessionId(response.resource());
+		final String correlatorId = extractCorrelatorFromCookie(response.resource());
 		if (event.isCancelled()) {
-			logger.info("Browser {} unexpectedly disconnected", atmosphereSessionId);
+			logger.info("Browser {} unexpectedly disconnected", correlatorId);
 		} else if (event.isClosedByClient()) {
-			logger.info("Browser {} closed the connection", atmosphereSessionId);
+			logger.info("Browser {} closed the connection", correlatorId);
 		}
 	}
 
