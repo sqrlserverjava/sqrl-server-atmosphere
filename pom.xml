@@ -16,7 +16,7 @@
 		<dependency>
 			<groupId>com.github.dbadia.sqrl</groupId>
 			<artifactId>sqrl-server-base</artifactId>
-			<version>0.6.0-SNAPSHOT</version>
+			<version>0.6.1-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>org.atmosphere</groupId>
@@ -26,8 +26,8 @@
 	</dependencies>
 	
 	<scm>
-		<connection>scm:git:git@github.com:dbadia/sqrl-server-atmosphere.git</connection>
-		<developerConnection>scm:git:git@github.com:dbadia/sqrl-server-atmosphere.git</developerConnection>
-		<url>git@github.com:dbadia/sqrl-server-base.git</url>
+		<connection>scm:git:git@github.com:sqrlserverjava/sqrl-server-atmosphere.git</connection>
+		<developerConnection>scm:git:git@github.com:sqrlserverjava/sqrl-server-atmosphere.git</developerConnection>
+		<url>git@github.com:sqrlserverjava/sqrl-server-atmosphere.git</url>
 	</scm>
 </project>
