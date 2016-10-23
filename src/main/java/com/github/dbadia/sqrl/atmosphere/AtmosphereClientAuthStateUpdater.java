@@ -169,7 +169,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	 *            the atmosphere resource that was received
 	 */
 	public void updateCurrentAtomosphereRequest(final AtmosphereResource resource) {
-		final String correaltorId = extractCorrelatorFromCookie(resource); // TODO: rename to correaltorId
+		final String correaltorId = extractCorrelatorFromCookie(resource);
 		if (logger.isTraceEnabled()) {
 			logger.trace("In updateCurrentAtomosphereRequest for correaltorId {}, update? {}",
 					correaltorId, currentAtmosphereRequestTable.containsKey(correaltorId));

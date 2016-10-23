@@ -5,3 +5,8 @@ mvn.out
 mynotes.txt
 /bin/
 derby.log
+gradle/
+gradlew
+gradlew.bat
+build.gradle
+settings.gradle
