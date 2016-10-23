@@ -21,8 +21,7 @@ import com.github.dbadia.sqrl.server.SqrlAuthenticationStatus;
 import com.github.dbadia.sqrl.server.SqrlConfig;
 import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
 
-// TODO: rename /sqrlauthpolling
-@AtmosphereHandlerService(path = "/sqrlauthwebsocket", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
+@AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, ClientAuthStateUpdater {
 	private static final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
 
