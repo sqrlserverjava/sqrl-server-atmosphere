@@ -59,28 +59,22 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 			correlatorId = extractCorrelatorFromCookie(resource);
 
 			if (request.getMethod().equalsIgnoreCase("GET")) {
-				// GET is a polling request; suspend it until we are ready to respond
+				// GETs are the browser polling for an update; suspend it until we are ready to respond
 				if (logger.isInfoEnabled()) {
 					logger.info("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
-							toString(request.getCookies()), request.getHeader("User-Agent"));
+							cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				}
 				resource.suspend();
 				updateCurrentAtomosphereRequest(resource);
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
 				// Post means we're being sent data
-				final String message = request.getReader().readLine().trim(); // TODO: no trim and better parser
+				final String browserStatusString = request.getReader().readLine().trim(); // TODO: no trim and better
+				// parser
 				if (logger.isInfoEnabled()) {
 					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), correlatorId,
-							resource.uuid(), message, toString(request.getCookies()),
+							resource.uuid(), browserStatusString, cookiesToString(request.getCookies()),
 							request.getHeader("User-Agent"));
 				}
-				// Simple JSON message { "correlator" : "XYZ", "status" : "CORRELATOR_ISSUED" }
-				final String correlatorMessageString = message.substring(message.indexOf(':') + 2,
-						message.indexOf(',') - 1);
-				if (!correlatorMessageString.equals(correlatorId)) {
-					logger.error("Mismatch between atomsphere correlator param and cookie");
-				}
-				final String browserStatusString = message.substring(message.lastIndexOf(':') + 2, message.length() - 2);
 
 				if ("redirect".equals(browserStatusString)) {
 					// The browser received the complete update and is redirecting, clean up
@@ -89,7 +83,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 					SqrlAuthenticationStatus browserStatus = null;
 					SqrlAuthenticationStatus newStatus = null;
 					if (correlatorId == null) {
-						logger.warn("Browser {} sent null correlator {}", correlatorId, message);
+						logger.warn("Correaltor not found in browser polling request");
 						newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
 					}
 
@@ -97,7 +91,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 						browserStatus = SqrlAuthenticationStatus.valueOf(browserStatusString);
 						// Set them the same so, by default we will query the db
 					} catch (final RuntimeException e) {
-						logger.warn("Browser {} sent invalid status {}", correlatorId, message);
+						logger.warn("Browser {} sent invalid status {}", correlatorId, browserStatusString);
 						newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
 					}
 					if (newStatus != null) {
@@ -148,8 +142,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 					response.getWriter().flush();
 					break;
 				default:
-					// This appears to be legit for some transports, just do a debug log
-					logger.debug("No action taken to flush response for transport {} for correaltor {}",
+					// This appears to be legit for some transports, just do a trace log
+					logger.trace("No action taken to flush response for transport {} for correaltor {}",
 							resource.transport(), correlatorId);
 			}
 		} catch (final Exception e) {
@@ -160,8 +154,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	}
 
 	/**
-	 * Certain atmosphere polling mechanisms (long polling, etc)timeout and result in subsequent polling requests. This
-	 * method must be called each time a new request is received so we can send our response to the current, valid
+	 * Certain atmosphere polling mechanisms (long polling, etc) can time out and result in subsequent polling requests.
+	 * This method must be called each time a new request is received so we can send our response to the most current
 	 * resource object
 	 *
 	 * @param resource
@@ -180,9 +174,9 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	public void onStateChange(final AtmosphereResourceEvent event) throws IOException {
 		final AtmosphereResource resource = event.getResource();
 		if (!event.isResuming()) {
-			// There's no way to log the session id since the connection is closed
-			// If we try we get IllegalStateException: Cannot create a session after the response has been committed
-			logger.info("Atmosphere browser closed connection for uuid {}", resource.uuid());
+			// Connection is closed
+			logger.info("Atmosphere browser closed connection for correaltor {}, uuid {}",
+					extractCorrelatorFromCookie(resource), resource.uuid());
 		}
 	}
 
@@ -220,7 +214,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 		// Nothing to do
 	}
 
-	private static final String toString(final Cookie[] cookieArray) {
+	private static final String cookiesToString(final Cookie[] cookieArray) {
 		final StringBuilder buf = new StringBuilder("C[ ");
 		for (final Cookie cookie : cookieArray) {
 			buf.append(cookie.getName()).append("=").append(cookie.getValue()).append(", ");
