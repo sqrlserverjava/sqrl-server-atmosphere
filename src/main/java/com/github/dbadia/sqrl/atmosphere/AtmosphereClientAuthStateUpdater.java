@@ -15,14 +15,15 @@ import org.atmosphere.interceptor.AtmosphereResourceLifecycleInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.github.dbadia.sqrl.server.ClientAuthStateUpdater;
 import com.github.dbadia.sqrl.server.SqrlAuthStateMonitor;
 import com.github.dbadia.sqrl.server.SqrlAuthenticationStatus;
+import com.github.dbadia.sqrl.server.SqrlClientAuthStateUpdater;
 import com.github.dbadia.sqrl.server.SqrlConfig;
 import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
+import com.github.dbadia.sqrl.server.util.SqrlUtil;
 
 @AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
-public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, ClientAuthStateUpdater {
+public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, SqrlClientAuthStateUpdater {
 	private static final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
 
 	/**
@@ -62,17 +63,16 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 				// GETs are the browser polling for an update; suspend it until we are ready to respond
 				if (logger.isInfoEnabled()) {
 					logger.info("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
-							cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
+							SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				}
 				resource.suspend();
 				updateCurrentAtomosphereRequest(resource);
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
 				// Post means we're being sent data
-				final String browserStatusString = request.getReader().readLine().trim(); // TODO: no trim and better
-				// parser
+				final String browserStatusString = request.getReader().readLine();
 				if (logger.isInfoEnabled()) {
 					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), correlatorId,
-							resource.uuid(), browserStatusString, cookiesToString(request.getCookies()),
+							resource.uuid(), browserStatusString, SqrlUtil.cookiesToString(request.getCookies()),
 							request.getHeader("User-Agent"));
 				}
 
@@ -119,6 +119,10 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	@Override
 	public void pushStatusUpdateToBrowser(final String correlatorId,
 			final SqrlAuthenticationStatus oldAuthStatus, final SqrlAuthenticationStatus newAuthStatus) {
+		if (correlatorId == null) {
+			logger.error("Cant transmit new authStatus of {} since correlator was null", newAuthStatus);
+			return;
+		}
 		final AtmosphereResource resource = currentAtmosphereRequestTable.get(correlatorId);
 		if (resource == null) {
 			logger.error("AtmosphereResource not found for correlator {}, can't communicate status change from {} to {}",
@@ -212,14 +216,5 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Clie
 	@Override
 	public void destroy() {
 		// Nothing to do
-	}
-
-	private static final String cookiesToString(final Cookie[] cookieArray) {
-		final StringBuilder buf = new StringBuilder("C[ ");
-		for (final Cookie cookie : cookieArray) {
-			buf.append(cookie.getName()).append("=").append(cookie.getValue()).append(", ");
-		}
-
-		return buf.substring(0, buf.length() - 2) + " ]";
 	}
 }
