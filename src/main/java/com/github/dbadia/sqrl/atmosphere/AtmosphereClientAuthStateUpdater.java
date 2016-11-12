@@ -1,7 +1,6 @@
 package com.github.dbadia.sqrl.atmosphere;
 
 import java.io.IOException;
-import java.util.concurrent.TimeUnit;
 
 import javax.servlet.http.Cookie;
 
@@ -41,8 +40,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	@Override
 	public void initSqrl(final SqrlConfig sqrlConfig, final SqrlAuthStateMonitor sqrlAuthStateMonitor) {
 		if (currentAtmosphereRequestTable == null) {
-			final long millisToExpire = TimeUnit.MINUTES.toMillis(sqrlConfig.getNutValidityInSeconds());
-			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(millisToExpire);
+			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(
+					sqrlConfig.getNutValidityInMillis());
 		}
 		AtmosphereClientAuthStateUpdater.sqrlAuthStateMonitor = sqrlAuthStateMonitor;
 		AtmosphereClientAuthStateUpdater.sqrlCorrelatorCookieName = sqrlConfig.getCorrelatorCookieName();
