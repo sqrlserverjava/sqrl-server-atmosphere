@@ -1,6 +1,7 @@
 package com.github.dbadia.sqrl.atmosphere;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 import javax.servlet.http.Cookie;
 
@@ -33,15 +34,25 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	 * We use {@link SelfExpiringHashMap} so that old entries get removed automatically. We keep this as a static as
 	 * it's possible the atmosphere will create multiple instances of this class
 	 */
-	private static SelfExpiringHashMap<String, AtmosphereResource> currentAtmosphereRequestTable;
-	private static SqrlAuthStateMonitor sqrlAuthStateMonitor = null;
-	private static String sqrlCorrelatorCookieName = null;
+	private static SelfExpiringHashMap<String, AtmosphereResource>			currentAtmosphereRequestTable;
+	/**
+	 * There is a subtle race condition with the atmosphere framework whereas the client needs to reconnect but this
+	 * logic sends the status update to the old connection. As a workaround, we cache the latest state change here for a
+	 * short amount of time
+	 */
+	private static SelfExpiringHashMap<String, SqrlAuthenticationStatus>	stateChangeCache;
+	private static SqrlAuthStateMonitor										sqrlAuthStateMonitor		= null;
+	private static String													sqrlCorrelatorCookieName	= null;
 
 	@Override
 	public void initSqrl(final SqrlConfig sqrlConfig, final SqrlAuthStateMonitor sqrlAuthStateMonitor) {
 		if (currentAtmosphereRequestTable == null) {
 			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(
 					sqrlConfig.getNutValidityInMillis());
+		}
+		if (stateChangeCache == null) {
+			AtmosphereClientAuthStateUpdater.stateChangeCache = new SelfExpiringHashMap<>(
+					TimeUnit.SECONDS.toMillis(20));
 		}
 		AtmosphereClientAuthStateUpdater.sqrlAuthStateMonitor = sqrlAuthStateMonitor;
 		AtmosphereClientAuthStateUpdater.sqrlCorrelatorCookieName = sqrlConfig.getCorrelatorCookieName();
@@ -64,44 +75,49 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					logger.info("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
 							SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				}
-				resource.suspend();
-				updateCurrentAtomosphereRequest(resource);
+				final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.remove(correlatorId);
+				if (newAuthStatus == null) {
+					resource.suspend();
+					updateCurrentAtomosphereRequest(resource);
+				} else {
+					transmitResponseToResource(correlatorId, resource, newAuthStatus);
+					logger.info("Immediate response triggered for polling request, sending {}", newAuthStatus);
+				}
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
-				// Post means we're being sent data
-				final String browserStatusString = request.getReader().readLine();
+				// Post means we're being sent data, should be trivial JSON: { "state" : "COMMUNICATING" }
+				// TODO: put this in method with size check and better logic
+				final String message = request.getReader().readLine().trim();
+				final String browserStatusString = message.substring(message.lastIndexOf(":") + 2,
+						message.length() - 2);
 				if (logger.isInfoEnabled()) {
 					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), correlatorId,
 							resource.uuid(), browserStatusString, SqrlUtil.cookiesToString(request.getCookies()),
 							request.getHeader("User-Agent"));
 				}
 
-				if ("redirect".equals(browserStatusString)) {
-					// The browser received the complete update and is redirecting, clean up
-					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
-				} else {
-					SqrlAuthenticationStatus browserStatus = null;
-					SqrlAuthenticationStatus newStatus = null;
-					if (correlatorId == null) {
-						logger.warn("Correaltor not found in browser polling request");
-						newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
-					}
+				SqrlAuthenticationStatus browserStatus = null;
+				SqrlAuthenticationStatus newStatus = null;
+				if (correlatorId == null) {
+					logger.warn("Correaltor not found in browser polling request");
+					newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
+				}
 
-					try {
-						browserStatus = SqrlAuthenticationStatus.valueOf(browserStatusString);
-						// Set them the same so, by default we will query the db
-					} catch (final RuntimeException e) {
-						logger.warn("Browser {} sent invalid status {}", correlatorId, browserStatusString);
-						newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
-					}
-					if (newStatus != null) {
-						// Error state, send the reply right away
-						pushStatusUpdateToBrowser(correlatorId, browserStatus, newStatus);
-					} else if (sqrlAuthStateMonitor == null) {
-						logger.error("init error, sqrlAuthStateMonitor is null, can't monitor correlator for change");
-					} else {
-						// Let the monitor watch the db for correlator change, then send the reply when it changes
-						sqrlAuthStateMonitor.monitorCorrelatorForChange(correlatorId, browserStatus);
-					}
+				try {
+					browserStatus = SqrlAuthenticationStatus.valueOf(browserStatusString);
+					// Set them the same so, by default we will query the db
+				} catch (final RuntimeException e) {
+					logger.warn("Browser {} sent invalid status {}", correlatorId, browserStatusString);
+					newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
+				}
+
+				if (newStatus != null) {
+					// Error state, send the reply right away
+					pushStatusUpdateToBrowser(correlatorId, browserStatus, newStatus);
+				} else if (sqrlAuthStateMonitor == null) {
+					logger.error("init error, sqrlAuthStateMonitor is null, can't monitor correlator for change");
+				} else {
+					// Let the monitor watch the db for correlator change, then send the reply when it changes
+					sqrlAuthStateMonitor.monitorCorrelatorForChange(correlatorId, browserStatus);
 				}
 			}
 		} catch (final Exception e) {
@@ -118,6 +134,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	@Override
 	public void pushStatusUpdateToBrowser(final String correlatorId,
 			final SqrlAuthenticationStatus oldAuthStatus, final SqrlAuthenticationStatus newAuthStatus) {
+		stateChangeCache.put(correlatorId, newAuthStatus);
 		if (correlatorId == null) {
 			logger.error("Cant transmit new authStatus of {} since correlator was null", newAuthStatus);
 			return;
@@ -128,9 +145,12 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					correlatorId, oldAuthStatus, newAuthStatus);
 			return;
 		}
+		transmitResponseToResource(correlatorId, resource, newAuthStatus);
+	}
+
+	private void transmitResponseToResource(final String correlatorId, final AtmosphereResource resource,
+			final SqrlAuthenticationStatus newAuthStatus) {
 		final AtmosphereResponse response = resource.getResponse();
-		logger.info("Sending atmosphere state change from {} to  {} via {} to {}, ", oldAuthStatus, newAuthStatus,
-				resource.transport(), correlatorId);
 		try {
 			response.getWriter().write(newAuthStatus.toString());
 			switch (resource.transport()) {
@@ -148,6 +168,10 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					// This appears to be legit for some transports, just do a trace log
 					logger.trace("No action taken to flush response for transport {} for correaltor {}",
 							resource.transport(), correlatorId);
+			}
+			if (newAuthStatus == SqrlAuthenticationStatus.AUTH_COMPLETE) {
+				// The browser received the complete update and is redirecting, clean up
+				sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 			}
 		} catch (final Exception e) {
 			logger.error(new StringBuilder("Caught IO error trying to send status of ").append(newAuthStatus)
