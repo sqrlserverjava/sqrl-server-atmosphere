@@ -1,6 +1,7 @@
 package com.github.dbadia.sqrl.atmosphere;
 
 import java.io.IOException;
+import java.io.Reader;
 import java.util.concurrent.TimeUnit;
 
 import javax.servlet.http.Cookie;
@@ -20,11 +21,16 @@ import com.github.dbadia.sqrl.server.SqrlAuthenticationStatus;
 import com.github.dbadia.sqrl.server.SqrlClientAuthStateUpdater;
 import com.github.dbadia.sqrl.server.SqrlConfig;
 import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
+import com.github.dbadia.sqrl.server.util.SqrlIllegalDataException;
+import com.github.dbadia.sqrl.server.util.SqrlSanitize;
 import com.github.dbadia.sqrl.server.util.SqrlUtil;
 
 @AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, SqrlClientAuthStateUpdater {
-	private static final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
+	private static final int		JSON_SIZE_LIMIT		= 200;
+	private static final Logger		logger				= LoggerFactory
+			.getLogger(AtmosphereClientAuthStateUpdater.class);
+	private static final String		JSON_TAG_NAME		= "state";
 
 	/**
 	 * Table of correlator cookie to most current AtmosphereResource request object. This is necessary as certain
@@ -68,7 +74,6 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		try {
 			final AtmosphereRequest request = resource.getRequest();
 			correlatorId = extractCorrelatorFromCookie(resource);
-
 			if (request.getMethod().equalsIgnoreCase("GET")) {
 				// GETs are the browser polling for an update; suspend it until we are ready to respond
 				if (logger.isInfoEnabled()) {
@@ -85,10 +90,10 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 				}
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
 				// Post means we're being sent data, should be trivial JSON: { "state" : "COMMUNICATING" }
-				// TODO: put this in method with size check and better logic
-				final String message = request.getReader().readLine().trim();
-				final String browserStatusString = message.substring(message.lastIndexOf(":") + 2,
-						message.length() - 2);
+				String browserStatusString = null;
+				try (Reader reader = request.getReader()) {
+					browserStatusString = validateAndParseStateValueFromJson(reader);
+				}
 				if (logger.isInfoEnabled()) {
 					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), correlatorId,
 							resource.uuid(), browserStatusString, SqrlUtil.cookiesToString(request.getCookies()),
@@ -207,25 +212,6 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		}
 	}
 
-	private static String extractCorrelatorFromCookie(final AtmosphereResource resource) {
-		if (resource.getRequest() == null) {
-			logger.error("Couldn't extract correlator from cookie since atmosphere request was null");
-			return null;
-		}
-		if (resource.getRequest().getCookies() == null) {
-			logger.error("Couldn't extract correlator from cookie since atmosphere request.getCookies() was null");
-			return null;
-		}
-
-		for (final Cookie cookie : resource.getRequest().getCookies()) {
-			if (sqrlCorrelatorCookieName.equals(cookie.getName())) {
-				return cookie.getValue();
-			}
-		}
-		logger.error("Couldn't extract correlator from cookie; cookie not found in atmosphere request.getCookies()");
-		return null;
-	}
-
 	public void onDisconnect(final AtmosphereResponse response) throws IOException {
 		final AtmosphereResourceEvent event = response.resource().getAtmosphereResourceEvent();
 		final String correlatorId = extractCorrelatorFromCookie(response.resource());
@@ -240,4 +226,66 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	public void destroy() {
 		// Nothing to do
 	}
+
+	// package-protected for unit testing
+	static String validateAndParseStateValueFromJson(final Reader reader) throws SqrlIllegalDataException, IOException {
+		final char[] chars = new char[JSON_SIZE_LIMIT+1];
+		if(reader.read(chars) > JSON_SIZE_LIMIT) {
+			throw new SqrlIllegalDataException("Atomsophere json exeeded max size of " + JSON_SIZE_LIMIT);
+		}
+		String shouldBeJson = new String(chars);
+		// Our json is trivial, just parse using index of instead of pulling in a json lib
+		shouldBeJson = shouldBeJson.trim();
+		if(!shouldBeJson.startsWith("{") || !shouldBeJson.endsWith("}")) {
+			throw new SqrlIllegalDataException("Atomsophere json was invalid: " + shouldBeJson);
+		}
+		shouldBeJson = shouldBeJson.replace("{", "");
+		shouldBeJson = shouldBeJson.replace("}", "");
+		shouldBeJson = shouldBeJson.replace("\"", "");
+		shouldBeJson = shouldBeJson.trim();
+		final int colonIndex = shouldBeJson.lastIndexOf(':');
+		if(colonIndex == -1) {
+			throw new SqrlIllegalDataException("Atomsophere json was missing colon: " + shouldBeJson);
+		}
+		final String[] partArray = shouldBeJson.split(":");
+		// Add tokens should be alphanumeric
+		for (int i = 0; i < partArray.length; i++) {
+			partArray[i] = partArray[i].trim();
+			SqrlSanitize.inspectIncomingSqrlData(partArray[i]);
+		}
+		if (partArray.length != 2) {
+			throw new SqrlIllegalDataException("Atomsophere json had wrong number of parts: " + shouldBeJson);
+		} else if (!JSON_TAG_NAME.equals(partArray[0].trim())) {
+			throw new SqrlIllegalDataException("Atomsophere json was missing expected tag name: " + shouldBeJson);
+		}
+		return partArray[1];
+	}
+
+	// package-protected for unit testing
+	static String extractCorrelatorFromCookie(final AtmosphereResource resource) {
+		if (resource.getRequest() == null) {
+			logger.error("Couldn't extract correlator from cookie since atmosphere request was null");
+			return null;
+		}
+		if (resource.getRequest().getCookies() == null) {
+			logger.error("Couldn't extract correlator from cookie since atmosphere request.getCookies() was null");
+			return null;
+		}
+
+		for (final Cookie cookie : resource.getRequest().getCookies()) {
+			if (sqrlCorrelatorCookieName.equals(cookie.getName())) {
+				final String value = cookie.getValue();
+				try {
+					SqrlSanitize.inspectIncomingSqrlData(value);
+					return value;
+				} catch (final SqrlIllegalDataException e) {
+					logger.error("Correlator cookie found but failed data validation: {}", value);
+					return null;
+				}
+			}
+		}
+		logger.error("Couldn't extract correlator from cookie; cookie not found in atmosphere request.getCookies()");
+		return null;
+	}
+
 }
