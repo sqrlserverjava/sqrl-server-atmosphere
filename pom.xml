@@ -15,7 +15,7 @@
 		<dependency>
 			<groupId>com.github.sqrlserverjava</groupId>
 			<artifactId>sqrl-server-base</artifactId>
-			<version>0.9.2</version>
+			<version>0.9.3-SNAPSHOT</version>
 			<!-- provided since the base lib will be updated much 
 			more frequently than this; let base be defined on it's own-->
 			<scope>provided</scope>

@@ -20,8 +20,8 @@ import com.github.dbadia.sqrl.server.SqrlAuthStateMonitor;
 import com.github.dbadia.sqrl.server.SqrlAuthenticationStatus;
 import com.github.dbadia.sqrl.server.SqrlClientAuthStateUpdater;
 import com.github.dbadia.sqrl.server.SqrlConfig;
+import com.github.dbadia.sqrl.server.exception.SqrlInvalidDataException;
 import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
-import com.github.dbadia.sqrl.server.util.SqrlIllegalDataException;
 import com.github.dbadia.sqrl.server.util.SqrlSanitize;
 import com.github.dbadia.sqrl.server.util.SqrlUtil;
 
@@ -228,16 +228,16 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	}
 
 	// package-protected for unit testing
-	static String validateAndParseStateValueFromJson(final Reader reader) throws SqrlIllegalDataException, IOException {
+	static String validateAndParseStateValueFromJson(final Reader reader) throws SqrlInvalidDataException, IOException {
 		final char[] chars = new char[JSON_SIZE_LIMIT+1];
 		if(reader.read(chars) > JSON_SIZE_LIMIT) {
-			throw new SqrlIllegalDataException("Atomsophere json exeeded max size of " + JSON_SIZE_LIMIT);
+			throw new SqrlInvalidDataException("Atomsophere json exeeded max size of " + JSON_SIZE_LIMIT);
 		}
 		String shouldBeJson = new String(chars);
 		// Our json is trivial, just parse using index of instead of pulling in a json lib
 		shouldBeJson = shouldBeJson.trim();
 		if(!shouldBeJson.startsWith("{") || !shouldBeJson.endsWith("}")) {
-			throw new SqrlIllegalDataException("Atomsophere json was invalid: " + shouldBeJson);
+			throw new SqrlInvalidDataException("Atomsophere json was invalid: " + shouldBeJson);
 		}
 		shouldBeJson = shouldBeJson.replace("{", "");
 		shouldBeJson = shouldBeJson.replace("}", "");
@@ -245,7 +245,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		shouldBeJson = shouldBeJson.trim();
 		final int colonIndex = shouldBeJson.lastIndexOf(':');
 		if(colonIndex == -1) {
-			throw new SqrlIllegalDataException("Atomsophere json was missing colon: " + shouldBeJson);
+			throw new SqrlInvalidDataException("Atomsophere json was missing colon: " + shouldBeJson);
 		}
 		final String[] partArray = shouldBeJson.split(":");
 		// Add tokens should be alphanumeric
@@ -254,9 +254,9 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			SqrlSanitize.inspectIncomingSqrlData(partArray[i]);
 		}
 		if (partArray.length != 2) {
-			throw new SqrlIllegalDataException("Atomsophere json had wrong number of parts: " + shouldBeJson);
+			throw new SqrlInvalidDataException("Atomsophere json had wrong number of parts: " + shouldBeJson);
 		} else if (!JSON_TAG_NAME.equals(partArray[0].trim())) {
-			throw new SqrlIllegalDataException("Atomsophere json was missing expected tag name: " + shouldBeJson);
+			throw new SqrlInvalidDataException("Atomsophere json was missing expected tag name: " + shouldBeJson);
 		}
 		return partArray[1];
 	}
@@ -278,7 +278,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 				try {
 					SqrlSanitize.inspectIncomingSqrlData(value);
 					return value;
-				} catch (final SqrlIllegalDataException e) {
+				} catch (final SqrlInvalidDataException e) {
 					logger.error("Correlator cookie found but failed data validation: {}", value);
 					return null;
 				}
