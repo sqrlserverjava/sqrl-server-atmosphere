@@ -10,4 +10,4 @@ This java library is a companion to the [sqrl-server-base](https://github.com/sq
 See the [sqrl-server-base](https://github.com/sqrlserverjava/sqrl-server-base/) project
 
 #### Reporting Issues
-Issues and security vulnerabilities should be reported via the GitHub issue tracker
+See [CONTRIBUTING.md](https://github.com/sqrlserverjava/sqrl-server-atmosphere/blob/master/CONTRIBUTING.md)
