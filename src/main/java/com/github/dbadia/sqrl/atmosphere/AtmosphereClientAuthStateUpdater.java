@@ -1,5 +1,9 @@
 package com.github.dbadia.sqrl.atmosphere;
 
+import static com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus.AUTHENTICATED_BROWSER;
+import static com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus.AUTHENTICATED_CPS;
+import static com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
+
 import java.io.IOException;
 import java.io.Reader;
 import java.util.concurrent.TimeUnit;
@@ -19,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import com.github.dbadia.sqrl.server.SqrlAuthStateMonitor;
 import com.github.dbadia.sqrl.server.SqrlClientAuthStateUpdater;
 import com.github.dbadia.sqrl.server.SqrlConfig;
+import com.github.dbadia.sqrl.server.SqrlServerOperations;
 import com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus;
 import com.github.dbadia.sqrl.server.exception.SqrlInvalidDataException;
 import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
@@ -49,9 +54,11 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	private static SelfExpiringHashMap<String, SqrlAuthenticationStatus>	stateChangeCache;
 	private static SqrlAuthStateMonitor										sqrlAuthStateMonitor		= null;
 	private static String													sqrlCorrelatorCookieName	= null;
+	private static SqrlServerOperations sqrlServerOperations = null;
 
 	@Override
-	public void initSqrl(final SqrlConfig sqrlConfig, final SqrlAuthStateMonitor sqrlAuthStateMonitor) {
+	public void initSqrl(final SqrlServerOperations sqrlServerOperations, final SqrlConfig sqrlConfig,
+			final SqrlAuthStateMonitor sqrlAuthStateMonitor) {
 		if (currentAtmosphereRequestTable == null) {
 			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(
 					sqrlConfig.getNutValidityInMillis());
@@ -62,6 +69,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		}
 		AtmosphereClientAuthStateUpdater.sqrlAuthStateMonitor = sqrlAuthStateMonitor;
 		AtmosphereClientAuthStateUpdater.sqrlCorrelatorCookieName = sqrlConfig.getCorrelatorCookieName();
+		AtmosphereClientAuthStateUpdater.sqrlServerOperations = sqrlServerOperations;
 	}
 
 	/**
@@ -104,7 +112,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 				SqrlAuthenticationStatus newStatus = null;
 				if (correlatorId == null) {
 					logger.warn("Correaltor not found in browser polling request");
-					newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
+					newStatus = ERROR_BAD_REQUEST;
 				}
 
 				try {
@@ -112,7 +120,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					// Set them the same so, by default we will query the db
 				} catch (final RuntimeException e) {
 					logger.warn("Browser {} sent invalid status {}", correlatorId, browserStatusString);
-					newStatus = SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
+					newStatus = ERROR_BAD_REQUEST;
 				}
 
 				if (newStatus != null) {
@@ -120,6 +128,10 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					pushStatusUpdateToBrowser(correlatorId, browserStatus, newStatus);
 				} else if (sqrlAuthStateMonitor == null) {
 					logger.error("init error, sqrlAuthStateMonitor is null, can't monitor correlator for change");
+				} else if (browserStatus == AUTHENTICATED_CPS) {
+					// State of CPS means we no longer need to monitor and should clear all cookies
+					sqrlServerOperations.deleteSqrlAuthCookies(request, resource.getResponse());
+					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 				} else {
 					// Let the monitor watch the db for correlator change, then send the reply when it changes
 					sqrlAuthStateMonitor.monitorCorrelatorForChange(correlatorId, browserStatus);
@@ -159,22 +171,22 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		try {
 			response.getWriter().write(newAuthStatus.toString());
 			switch (resource.transport()) {
-				case JSONP:
-				case LONG_POLLING:
-					resource.resume();
-					break;
-				case WEBSOCKET:
-					break;
-				case SSE: // flush() is not in the original examples but is necessary for SSE
-				case STREAMING:
-					response.getWriter().flush();
-					break;
-				default:
-					// This appears to be legit for some transports, just do a trace log
-					logger.trace("No action taken to flush response for transport {} for correaltor {}",
-							resource.transport(), correlatorId);
+			case JSONP:
+			case LONG_POLLING:
+				resource.resume();
+				break;
+			case WEBSOCKET:
+				break;
+			case SSE: // flush() is not in the original examples but is necessary for SSE
+			case STREAMING:
+				response.getWriter().flush();
+				break;
+			default:
+				// This appears to be legit for some transports, just do a trace log
+				logger.trace("No action taken to flush response for transport {} for correaltor {}",
+						resource.transport(), correlatorId);
 			}
-			if (newAuthStatus == SqrlAuthenticationStatus.AUTH_COMPLETE) {
+			if (newAuthStatus == AUTHENTICATED_BROWSER) {
 				// The browser received the complete update and is redirecting, clean up
 				sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 			}
@@ -207,7 +219,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		final AtmosphereResource resource = event.getResource();
 		if (!event.isResuming()) {
 			// Connection is closed
-			logger.info("Atmosphere browser closed connection for correaltor {}, uuid {}",
+			logger.info("Atmosphere browser closed connection for correlator {}, uuid {}",
 					extractCorrelatorFromCookie(resource), resource.uuid());
 		}
 	}

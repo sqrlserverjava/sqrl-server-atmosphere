@@ -5,6 +5,7 @@ import org.mockito.Mockito;
 
 import com.github.dbadia.sqrl.server.SqrlAuthStateMonitor;
 import com.github.dbadia.sqrl.server.SqrlConfig;
+import com.github.dbadia.sqrl.server.SqrlServerOperations;
 
 public class AtmosphereClientAuthStateUpdaterTest {
 
@@ -13,7 +14,8 @@ public class AtmosphereClientAuthStateUpdaterTest {
 		final SqrlConfig sqrlConfig = new SqrlConfig();
 		final SqrlAuthStateMonitor mockAuthStateMonitor = Mockito.mock(SqrlAuthStateMonitor.class);
 		final AtmosphereClientAuthStateUpdater updater = new AtmosphereClientAuthStateUpdater();
-		updater.initSqrl(sqrlConfig, mockAuthStateMonitor);
+		final SqrlServerOperations operations = Mockito.mock(SqrlServerOperations.class);
+		updater.initSqrl(operations, sqrlConfig, mockAuthStateMonitor);
 	}
 
 }
