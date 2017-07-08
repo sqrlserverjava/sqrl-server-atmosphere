@@ -1,11 +1,12 @@
-package com.github.dbadia.sqrl.atmosphere;
+package com.github.sqrlserverjava;
 
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import com.github.dbadia.sqrl.server.SqrlAuthStateMonitor;
-import com.github.dbadia.sqrl.server.SqrlConfig;
-import com.github.dbadia.sqrl.server.SqrlServerOperations;
+import com.github.sqrlserverjava.SqrlAuthStateMonitor;
+import com.github.sqrlserverjava.SqrlConfig;
+import com.github.sqrlserverjava.SqrlServerOperations;
+import com.github.sqrlserverjava.atmosphere.AtmosphereClientAuthStateUpdater;
 
 public class AtmosphereClientAuthStateUpdaterTest {
 

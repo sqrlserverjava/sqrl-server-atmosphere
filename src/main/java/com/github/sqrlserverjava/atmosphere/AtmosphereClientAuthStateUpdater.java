@@ -1,8 +1,8 @@
-package com.github.dbadia.sqrl.atmosphere;
+package com.github.sqrlserverjava.atmosphere;
 
-import static com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus.AUTHENTICATED_BROWSER;
-import static com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus.AUTHENTICATED_CPS;
-import static com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
+import static com.github.sqrlserverjava.enums.SqrlAuthenticationStatus.AUTHENTICATED_BROWSER;
+import static com.github.sqrlserverjava.enums.SqrlAuthenticationStatus.AUTHENTICATED_CPS;
+import static com.github.sqrlserverjava.enums.SqrlAuthenticationStatus.ERROR_BAD_REQUEST;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -20,15 +20,15 @@ import org.atmosphere.interceptor.AtmosphereResourceLifecycleInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.github.dbadia.sqrl.server.SqrlAuthStateMonitor;
-import com.github.dbadia.sqrl.server.SqrlClientAuthStateUpdater;
-import com.github.dbadia.sqrl.server.SqrlConfig;
-import com.github.dbadia.sqrl.server.SqrlServerOperations;
-import com.github.dbadia.sqrl.server.enums.SqrlAuthenticationStatus;
-import com.github.dbadia.sqrl.server.exception.SqrlInvalidDataException;
-import com.github.dbadia.sqrl.server.util.SelfExpiringHashMap;
-import com.github.dbadia.sqrl.server.util.SqrlSanitize;
-import com.github.dbadia.sqrl.server.util.SqrlUtil;
+import com.github.sqrlserverjava.SqrlAuthStateMonitor;
+import com.github.sqrlserverjava.SqrlClientAuthStateUpdater;
+import com.github.sqrlserverjava.SqrlConfig;
+import com.github.sqrlserverjava.SqrlServerOperations;
+import com.github.sqrlserverjava.enums.SqrlAuthenticationStatus;
+import com.github.sqrlserverjava.exception.SqrlInvalidDataException;
+import com.github.sqrlserverjava.util.SelfExpiringHashMap;
+import com.github.sqrlserverjava.util.SqrlSanitize;
+import com.github.sqrlserverjava.util.SqrlUtil;
 
 @AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, SqrlClientAuthStateUpdater {
@@ -45,13 +45,13 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	 * We use {@link SelfExpiringHashMap} so that old entries get removed automatically. We keep this as a static as
 	 * it's possible the atmosphere will create multiple instances of this class
 	 */
-	private static SelfExpiringHashMap<String, AtmosphereResource>			currentAtmosphereRequestTable;
+	private static volatile SelfExpiringHashMap<String, AtmosphereResource>	currentAtmosphereRequestTable;
 	/**
 	 * There is a subtle race condition with the atmosphere framework whereas the client needs to reconnect but this
 	 * logic sends the status update to the old connection. As a workaround, we cache the latest state change here for a
 	 * short amount of time
 	 */
-	private static SelfExpiringHashMap<String, SqrlAuthenticationStatus>	stateChangeCache;
+	private static volatile SelfExpiringHashMap<String, SqrlAuthenticationStatus> stateChangeCache;
 	private static SqrlAuthStateMonitor										sqrlAuthStateMonitor		= null;
 	private static String													sqrlCorrelatorCookieName	= null;
 	private static SqrlServerOperations sqrlServerOperations = null;
@@ -88,6 +88,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					logger.info("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
 							SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				}
+				// TODO: check correlatorId non-null
 				final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.remove(correlatorId);
 				if (newAuthStatus == null) {
 					resource.suspend();
