@@ -131,7 +131,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					logger.error("init error, sqrlAuthStateMonitor is null, can't monitor correlator for change");
 				} else if (browserStatus == AUTHENTICATED_CPS) {
 					// State of CPS means we no longer need to monitor and should clear all cookies
-					sqrlServerOperations.deleteSqrlAuthCookies(request, resource.getResponse());
+					sqrlServerOperations.browserFacingOperations().deleteSqrlAuthCookies(request,
+							resource.getResponse());
 					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 				} else {
 					// Let the monitor watch the db for correlator change, then send the reply when it changes
