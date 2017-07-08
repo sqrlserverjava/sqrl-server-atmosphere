@@ -1,4 +1,4 @@
-package com.github.sqrlserverjava;
+package com.github.sqrlserverjava.atmosphere;
 
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -6,7 +6,6 @@ import org.mockito.Mockito;
 import com.github.sqrlserverjava.SqrlAuthStateMonitor;
 import com.github.sqrlserverjava.SqrlConfig;
 import com.github.sqrlserverjava.SqrlServerOperations;
-import com.github.sqrlserverjava.atmosphere.AtmosphereClientAuthStateUpdater;
 
 public class AtmosphereClientAuthStateUpdaterTest {
 

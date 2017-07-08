@@ -1,4 +1,4 @@
-package com.github.sqrlserverjava;
+package com.github.sqrlserverjava.atmosphere;
 
 import java.io.StringReader;
 import java.util.Arrays;
@@ -9,8 +9,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameter;
 import org.junit.runners.Parameterized.Parameters;
-
-import com.github.sqrlserverjava.atmosphere.AtmosphereClientAuthStateUpdater;
 
 import junit.framework.TestCase;
 
