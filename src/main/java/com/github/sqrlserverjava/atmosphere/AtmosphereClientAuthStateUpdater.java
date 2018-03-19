@@ -32,10 +32,9 @@ import com.github.sqrlserverjava.util.SqrlUtil;
 
 @AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, SqrlClientAuthStateUpdater {
-	private static final int		JSON_SIZE_LIMIT		= 200;
-	private static final Logger		logger				= LoggerFactory
-			.getLogger(AtmosphereClientAuthStateUpdater.class);
-	private static final String		JSON_TAG_NAME		= "state";
+	private static final int JSON_SIZE_LIMIT = 200;
+	private static final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
+	private static final String JSON_TAG_NAME = "state";
 
 	/**
 	 * Table of correlator cookie to most current AtmosphereResource request object. This is necessary as certain
@@ -52,8 +51,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	 * short amount of time
 	 */
 	private static volatile SelfExpiringHashMap<String, SqrlAuthenticationStatus> stateChangeCache;
-	private static SqrlAuthStateMonitor										sqrlAuthStateMonitor		= null;
-	private static String													sqrlCorrelatorCookieName	= null;
+	private static SqrlAuthStateMonitor sqrlAuthStateMonitor = null;
+	private static String sqrlCorrelatorCookieName = null;
 	private static SqrlServerOperations sqrlServerOperations = null;
 
 	@Override
@@ -84,8 +83,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			correlatorId = extractCorrelatorFromCookie(resource);
 			if (request.getMethod().equalsIgnoreCase("GET")) {
 				// GETs are the browser polling for an update; suspend it until we are ready to respond
-				if (logger.isInfoEnabled()) {
-					logger.info("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
+				if (logger.isTraceEnabled()) {
+					logger.trace("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
 							SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				}
 				// TODO: check correlatorId non-null
