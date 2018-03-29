@@ -29,6 +29,8 @@ import com.github.sqrlserverjava.exception.SqrlInvalidDataException;
 import com.github.sqrlserverjava.util.SelfExpiringHashMap;
 import com.github.sqrlserverjava.util.SqrlSanitize;
 import com.github.sqrlserverjava.util.SqrlUtil;
+import com.github.sqrlserverjava.util.VersionExtractor;
+import com.github.sqrlserverjava.util.VersionExtractor.Module;
 
 @AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, SqrlClientAuthStateUpdater {
@@ -58,6 +60,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	@Override
 	public void initSqrl(final SqrlServerOperations sqrlServerOperations, final SqrlConfig sqrlConfig,
 			final SqrlAuthStateMonitor sqrlAuthStateMonitor) {
+		logger.info(VersionExtractor.extractDetailedBuildInfo(Module.ATMOSPHERE));
 		if (currentAtmosphereRequestTable == null) {
 			AtmosphereClientAuthStateUpdater.currentAtmosphereRequestTable = new SelfExpiringHashMap<>(
 					sqrlConfig.getNutValidityInMillis());

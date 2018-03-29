@@ -15,3 +15,4 @@ settings.gradle
 .classpath
 .project
 **/MANIFEST.MF
+src/main/java/com/github/sqrlserverjava/atmosphere/Version.java

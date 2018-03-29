@@ -3,10 +3,10 @@
 	<parent>
 		<groupId>com.github.sqrlserverjava</groupId>
 		<artifactId>sqrl-server-parent</artifactId>
-		<version>1.2.2</version>
+		<version>1.2.3-SNAPSHOT</version>
 	</parent>
 	<artifactId>sqrl-server-atmosphere</artifactId>
-	<version>1.0.2-SNAPSHOT</version>
+	<version>1.0.3-SNAPSHOT</version>
 	<name>SQRL Server Atmosphere Library</name>
 	<description>Extension to sqrl-server-base that refreshes the browser during SQRL authentication using the atomsphere framework (https://github.com/Atmosphere/atmosphere).</description>
 	<packaging>jar</packaging>
@@ -15,7 +15,7 @@
 		<dependency>
 			<groupId>com.github.sqrlserverjava</groupId>
 			<artifactId>sqrl-server-base</artifactId>
-			<version>0.9.4-SNAPSHOT</version>
+			<version>0.9.5-SNAPSHOT</version>
 			<!-- provided since the base lib will be updated much 
 			more frequently than this; let base be defined on it's own-->
 			<scope>provided</scope>
@@ -33,4 +33,27 @@
 		<url>git@github.com:sqrlserverjava/sqrl-server-atmosphere.git</url>
 	  <tag>HEAD</tag>
   </scm>
+  
+  	<build>
+		<plugins>
+			<plugin>
+				<!-- Include build info in development builds -->
+				<groupId>net.mgorski.quicktag</groupId>
+				<artifactId>quicktag</artifactId>
+				<version>2.1.5</version>
+				<executions>
+					<execution>
+						<phase>generate-sources</phase>
+						<goals>
+							<goal>quicktag</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<outputPackage>com.github.sqrlserverjava.atmosphere</outputPackage>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+  
 </project>
