@@ -91,13 +91,17 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 							SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				}
 				// TODO: check correlatorId non-null
-				final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.remove(correlatorId);
-				if (newAuthStatus == null) {
-					resource.suspend();
-					updateCurrentAtomosphereRequest(resource);
+				if (correlatorId == null) {
+					logger.warn("Browser sent null correlator");
 				} else {
-					transmitResponseToResource(correlatorId, resource, newAuthStatus);
-					logger.info("Immediate response triggered for polling request, sending {}", newAuthStatus);
+					final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.remove(correlatorId);
+					if (newAuthStatus == null) {
+						resource.suspend();
+						updateCurrentAtomosphereRequest(resource);
+					} else {
+						transmitResponseToResource(correlatorId, resource, newAuthStatus);
+						logger.info("Immediate response triggered for polling request, sending {}", newAuthStatus);
+					}
 				}
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
 				// Post means we're being sent data, should be trivial JSON: { "state" : "COMMUNICATING" }
