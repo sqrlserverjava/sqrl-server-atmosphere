@@ -86,10 +86,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			correlatorId = extractCorrelatorFromCookie(resource);
 			if (request.getMethod().equalsIgnoreCase("GET")) {
 				// GETs are the browser polling for an update; suspend it until we are ready to respond
-				if (logger.isTraceEnabled()) {
-					logger.trace("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
-							SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
-				}
+				logger.debug("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
+						SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				if (correlatorId == null) {
 					logger.warn("Browser sent null correlator");
 				} else {
@@ -177,8 +175,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			final SqrlAuthenticationStatus newAuthStatus) {
 		final AtmosphereResponse response = resource.getResponse();
 		try {
-			response.setContentType("text/plain; charset=us-ascii");
-			response.getWriter().write(newAuthStatus.toString());
+			response.setContentType("application/json");
+			response.getWriter().write("{ \"status\":\"" + newAuthStatus.toString() + "\" }");// TODO: optimize
 			switch (resource.transport()) {
 			case JSONP:
 			case LONG_POLLING:
@@ -259,7 +257,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		shouldBeJson = shouldBeJson.trim();
 		if(!shouldBeJson.startsWith("{") || !shouldBeJson.endsWith("}")) {
 			throw new SqrlInvalidDataException("Atomsophere json was invalid: " + shouldBeJson);
-		}
+		} // TODO: minimal-json
 		shouldBeJson = shouldBeJson.replace("{", "");
 		shouldBeJson = shouldBeJson.replace("}", "");
 		shouldBeJson = shouldBeJson.replace("\"", "");

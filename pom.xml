@@ -6,7 +6,7 @@
 		<version>1.2.3-SNAPSHOT</version>
 	</parent>
 	<artifactId>sqrl-server-atmosphere</artifactId>
-	<version>1.0.4-SNAPSHOT</version>
+	<version>1.0.5-SNAPSHOT</version>
 	<name>SQRL Server Atmosphere Library</name>
 	<description>Extension to sqrl-server-base that refreshes the browser during SQRL authentication using the atomsphere framework (https://github.com/Atmosphere/atmosphere).</description>
 	<packaging>jar</packaging>
