@@ -90,7 +90,6 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					logger.trace("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
 							SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
 				}
-				// TODO: check correlatorId non-null
 				if (correlatorId == null) {
 					logger.warn("Browser sent null correlator");
 				} else {
@@ -110,7 +109,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					browserStatusString = validateAndParseStateValueFromJson(reader);
 				}
 				if (logger.isInfoEnabled()) {
-					logger.info("onRequest {} {} {} {} {} {}", request.getMethod(), correlatorId,
+					logger.info("onRequest {} {} {} {} {} \"{}\"", request.getMethod(), correlatorId,
 							resource.uuid(), browserStatusString, SqrlUtil.cookiesToString(request.getCookies()),
 							request.getHeader("User-Agent"));
 				}
@@ -118,7 +117,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 				SqrlAuthenticationStatus browserStatus = null;
 				SqrlAuthenticationStatus newStatus = null;
 				if (correlatorId == null) {
-					logger.warn("Correaltor not found in browser polling request");
+					logger.warn("Correaltor not found in browser POST request");
 					newStatus = ERROR_BAD_REQUEST;
 				}
 
@@ -142,6 +141,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 				} else {
 					// Let the monitor watch the db for correlator change, then send the reply when it changes
+					logger.debug("triggering monitorCorrelatorForChange ", correlatorId);
 					sqrlAuthStateMonitor.monitorCorrelatorForChange(correlatorId, browserStatus);
 				}
 			}
@@ -177,6 +177,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			final SqrlAuthenticationStatus newAuthStatus) {
 		final AtmosphereResponse response = resource.getResponse();
 		try {
+			response.setContentType("text/plain; charset=us-ascii");
 			response.getWriter().write(newAuthStatus.toString());
 			switch (resource.transport()) {
 			case JSONP:
