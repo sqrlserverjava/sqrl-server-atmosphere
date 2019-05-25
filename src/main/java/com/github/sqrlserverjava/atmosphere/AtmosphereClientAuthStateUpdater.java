@@ -20,6 +20,9 @@ import org.atmosphere.interceptor.AtmosphereResourceLifecycleInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.eclipsesource.json.Json;
+import com.eclipsesource.json.JsonObject;
+import com.eclipsesource.json.ParseException;
 import com.github.sqrlserverjava.SqrlAuthStateMonitor;
 import com.github.sqrlserverjava.SqrlClientAuthStateUpdater;
 import com.github.sqrlserverjava.SqrlConfig;
@@ -28,13 +31,12 @@ import com.github.sqrlserverjava.enums.SqrlAuthenticationStatus;
 import com.github.sqrlserverjava.exception.SqrlInvalidDataException;
 import com.github.sqrlserverjava.util.SelfExpiringHashMap;
 import com.github.sqrlserverjava.util.SqrlSanitize;
-import com.github.sqrlserverjava.util.SqrlUtil;
 import com.github.sqrlserverjava.util.VersionExtractor;
 import com.github.sqrlserverjava.util.VersionExtractor.Module;
 
 @AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
 public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, SqrlClientAuthStateUpdater {
-	private static final int JSON_SIZE_LIMIT = 200;
+	private static final int JSON_SIZE_LIMIT = 300;
 	private static final Logger logger = LoggerFactory.getLogger(AtmosphereClientAuthStateUpdater.class);
 	private static final String JSON_TAG_NAME = "state";
 
@@ -46,7 +48,9 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	 * We use {@link SelfExpiringHashMap} so that old entries get removed automatically. We keep this as a static as
 	 * it's possible the atmosphere will create multiple instances of this class
 	 */
-	private static volatile SelfExpiringHashMap<String, AtmosphereResource>	currentAtmosphereRequestTable;
+	private static volatile SelfExpiringHashMap<String, AtmosphereResource> currentAtmosphereRequestTable; // TODO:
+	// rename to
+	// ResourceTable
 	/**
 	 * There is a subtle race condition with the atmosphere framework whereas the client needs to reconnect but this
 	 * logic sends the status update to the old connection. As a workaround, we cache the latest state change here for a
@@ -80,74 +84,91 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	 */
 	@Override
 	public void onRequest(final AtmosphereResource resource) {
-		String correlatorId = null;
+		String correlator = null; // Only set/known during post
+		final String atmosUuid = resource.uuid();
 		try {
 			final AtmosphereRequest request = resource.getRequest();
-			correlatorId = extractCorrelatorFromCookie(resource);
+			// correlator = extractCorrelatorFromCookie(resource);
+			final String data = null;
 			if (request.getMethod().equalsIgnoreCase("GET")) {
+				logger.info("atmos GET");
 				// GETs are the browser polling for an update; suspend it until we are ready to respond
-				logger.debug("onRequest {} {} {} {} {}", request.getMethod(), correlatorId, resource.uuid(),
-						SqrlUtil.cookiesToString(request.getCookies()), request.getHeader("User-Agent"));
-				if (correlatorId == null) {
-					logger.warn("Browser sent null correlator");
+				// This is the one place where we don't have access to the correlator
+				logger.debug(
+						"channel=poll process=atmosGetPoll cor=unknown transport={} atmosuuid={} useragent=\"{}\"",
+						resource.transport(), atmosUuid, request.getHeader("User-Agent"));
+				resource.suspend();
+				correlator = request.getHeader("X-sqrl-corelator");
+
+				final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.remove(correlator);
+				if (newAuthStatus == null) {
+					resource.suspend();
+					updateCurrentAtomosphereRequest(correlator, resource, request.getHeader("User-Agent"));
 				} else {
-					final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.remove(correlatorId);
-					if (newAuthStatus == null) {
-						resource.suspend();
-						updateCurrentAtomosphereRequest(resource);
-					} else {
-						transmitResponseToResource(correlatorId, resource, newAuthStatus);
-						logger.info("Immediate response triggered for polling request, sending {}", newAuthStatus);
-					}
+					transmitResponseToResource(correlator, resource, newAuthStatus);
+					logger.info("Immediate response triggered for polling request, sending {}", newAuthStatus);
 				}
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
+				logger.info("atmos POST");
 				// Post means we're being sent data, should be trivial JSON: { "state" : "COMMUNICATING" }
-				String browserStatusString = null;
+				String browserStateString = null;
 				try (Reader reader = request.getReader()) {
-					browserStatusString = validateAndParseStateValueFromJson(reader);
-				}
-				if (logger.isInfoEnabled()) {
-					logger.info("onRequest {} {} {} {} {} \"{}\"", request.getMethod(), correlatorId,
-							resource.uuid(), browserStatusString, SqrlUtil.cookiesToString(request.getCookies()),
-							request.getHeader("User-Agent"));
+					final JsonObject jsonObject = validateAndParseStateValueFromJson(correlator, reader);
+					browserStateString = jsonObject.get("state").asString();
+					correlator = jsonObject.get("correlator").asString();
 				}
 
-				SqrlAuthenticationStatus browserStatus = null;
-				SqrlAuthenticationStatus newStatus = null;
-				if (correlatorId == null) {
-					logger.warn("Correaltor not found in browser POST request");
-					newStatus = ERROR_BAD_REQUEST;
+				if (logger.isInfoEnabled()) {
+					logger.info(
+							"channel=poll process=atmosPostRecvState cor={} state={} atmosuuid={} useragent=\"{}\"",
+							correlator, browserStateString, atmosUuid, request.getHeader("User-Agent"));
 				}
+				updateCurrentAtomosphereRequest(correlator, resource, request.getHeader("User-Agent"));
+				final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.get(correlator);
+				logger.info("newAuthStatus={}", newAuthStatus);
+				// resource.suspend(); TODO: delete
+				if (newAuthStatus != null) {
+					transmitResponseToResource(correlator, resource, newAuthStatus);
+					logger.info("Immediate response triggered for polling request, sending {}", newAuthStatus);
+				}
+
+				SqrlAuthenticationStatus browserState = null;
+				SqrlAuthenticationStatus newStatus = null;
 
 				try {
-					browserStatus = SqrlAuthenticationStatus.valueOf(browserStatusString);
-					// Set them the same so, by default we will query the db
+					browserState = SqrlAuthenticationStatus.valueOf(browserStateString);
+					// Set them the same so, by default we will query the db TOOD: what?
 				} catch (final RuntimeException e) {
-					logger.warn("Browser {} sent invalid status {}", correlatorId, browserStatusString);
+					logger.warn(
+							"channel=poll cor={} detail=\"browser sent invalid state\" state={} useragent=\"{}\" atmosuuid={}",
+							correlator, browserStateString);
 					newStatus = ERROR_BAD_REQUEST;
 				}
 
 				if (newStatus != null) {
 					// Error state, send the reply right away
-					pushStatusUpdateToBrowser(correlatorId, browserStatus, newStatus);
+					pushStatusUpdateToBrowser(correlator, browserState, newStatus);
 				} else if (sqrlAuthStateMonitor == null) {
-					logger.error("init error, sqrlAuthStateMonitor is null, can't monitor correlator for change");
-				} else if (browserStatus == AUTHENTICATED_CPS) {
+					logger.error(
+							"channel=poll cor={} detail=\"init error, sqrlAuthStateMonitor is null, can't monitor correlator for change\" atmosuuid={}",
+							correlator, atmosUuid);
+				} else if (browserState == AUTHENTICATED_CPS) {
 					// State of CPS means we no longer need to monitor and should clear all cookies
 					sqrlServerOperations.browserFacingOperations().deleteSqrlAuthCookies(request,
 							resource.getResponse());
-					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
+					sqrlAuthStateMonitor.stopMonitoringCorrelator(correlator);
 				} else {
 					// Let the monitor watch the db for correlator change, then send the reply when it changes
-					logger.debug("triggering monitorCorrelatorForChange ", correlatorId);
-					sqrlAuthStateMonitor.monitorCorrelatorForChange(correlatorId, browserStatus);
+					logger.debug("channel=poll cor={} atmosuuid={} detail=\"triggering monitorCorrelatorForChange\"",
+							correlator, atmosUuid);
+					sqrlAuthStateMonitor.monitorCorrelatorForChange(correlator, browserState);
 				}
 			}
 		} catch (final Exception e) {
 			// Trap all exceptions here because we don't know what will happen if they bubble up to the atmosphere
 			// framework... it may kill an important thread or otherwise
-			logger.error(new StringBuilder("Error processing atmosphere request for correlator=")
-					.append(correlatorId).toString(), e);
+			logger.error("channel=poll cor={} atmosuuid={} detail=\"Error processing atmosphere request\"", correlator,
+					atmosUuid, e);
 		}
 	}
 
@@ -159,12 +180,15 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			final SqrlAuthenticationStatus oldAuthStatus, final SqrlAuthenticationStatus newAuthStatus) {
 		stateChangeCache.put(correlatorId, newAuthStatus);
 		if (correlatorId == null) {
-			logger.error("Cant transmit new authStatus of {} since correlator was null", newAuthStatus);
+			logger.error(
+					"channel=poll cor=null detail=\"Cant transmit new authStatus of {} since correlator was null\"",
+					newAuthStatus);
 			return;
 		}
 		final AtmosphereResource resource = currentAtmosphereRequestTable.get(correlatorId);
 		if (resource == null) {
-			logger.error("AtmosphereResource not found for correlator {}, can't communicate status change from {} to {}",
+			logger.error(
+					"channel=poll cor={} detail=\"AtmosphereResource not found for correlator, can't communicate status change from {} to {}\"",
 					correlatorId, oldAuthStatus, newAuthStatus);
 			return;
 		}
@@ -180,6 +204,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			switch (resource.transport()) {
 			case JSONP:
 			case LONG_POLLING:
+			case POLLING: // TODO: is this right?
 				resource.resume();
 				break;
 			case WEBSOCKET:
@@ -190,17 +215,17 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 				break;
 			default:
 				// This appears to be legit for some transports, just do a trace log
-				logger.trace("No action taken to flush response for transport {} for correaltor {}",
-						resource.transport(), correlatorId);
+				logger.trace("channel=poll cor={} detail=\"No action taken to flush response\" transport={}",
+						correlatorId, resource.transport());
 			}
 			if (newAuthStatus == AUTHENTICATED_BROWSER) {
 				// The browser received the complete update and is redirecting, clean up
 				sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 			}
 		} catch (final Exception e) {
-			logger.error(new StringBuilder("Caught IO error trying to send status of ").append(newAuthStatus)
-					.append(" via atmosphere to correaltor ").append(correlatorId)
-					.append(" with transport ").append(resource.transport()).toString(), e);
+			logger.error(
+					"channel=poll cor={} detail=\"Caught IO error trying to send status of {}\" transport={} atmosuuid={}",
+					correlatorId, newAuthStatus, resource.transport(), resource.uuid(), e);
 		}
 	}
 
@@ -212,13 +237,18 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	 * @param resource
 	 *            the atmosphere resource that was received
 	 */
-	public void updateCurrentAtomosphereRequest(final AtmosphereResource resource) {
-		final String correaltorId = extractCorrelatorFromCookie(resource);
-		if (logger.isTraceEnabled()) {
-			logger.trace("In updateCurrentAtomosphereRequest for correaltorId {}, update? {}",
-					correaltorId, currentAtmosphereRequestTable.containsKey(correaltorId));
+	public void updateCurrentAtomosphereRequest(final String correaltorId, final AtmosphereResource resource,
+			final String userAgent) { // TODO:
+		// Resource
+		final AtmosphereResource oldResource = currentAtmosphereRequestTable.put(correaltorId, resource);
+		if (oldResource != null) {
+			// This means the atmosphere client connection was destroyed and then reconnected
+			// This is normal with some browsers even when connectivity is stable.
+			// We rely on the correlator to co-ordinate front and back channel to correctly handle this case
+			logger.info(
+					"channel=poll cor={} process=atmosPostRecvState detail=\"browser polling reconnected\"  atmosuuid={} oldatmosuuid={} state={} useragent=\"{}\"",
+					correaltorId, resource.uuid(), oldResource.uuid(), userAgent);
 		}
-		currentAtmosphereRequestTable.put(correaltorId, resource);
 	}
 
 	@Override
@@ -226,20 +256,21 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 		final AtmosphereResource resource = event.getResource();
 		if (!event.isResuming()) {
 			// Connection is closed
-			logger.info("Atmosphere browser closed connection for correlator {}, uuid {}",
-					extractCorrelatorFromCookie(resource), resource.uuid());
+			logger.debug(
+					"channel=poll cor=unknown process=atmosOnStateChange detail=\"browser closed connection\" atmosuuid={}",
+					resource.uuid());
 		}
 	}
 
-	public void onDisconnect(final AtmosphereResponse response) throws IOException {
-		final AtmosphereResourceEvent event = response.resource().getAtmosphereResourceEvent();
-		final String correlatorId = extractCorrelatorFromCookie(response.resource());
-		if (event.isCancelled()) {
-			logger.info("Browser {} unexpectedly disconnected", correlatorId);
-		} else if (event.isClosedByClient()) {
-			logger.info("Browser {} closed the connection", correlatorId);
-		}
-	}
+	// public void onDisconnect(final AtmosphereResponse response) throws IOException {
+	// final AtmosphereResourceEvent event = response.resource().getAtmosphereResourceEvent();
+	// final String correlatorId = extractCorrelatorFromCookie(response.resource());
+	// if (event.isCancelled()) {
+	// logger.info("Browser {} unexpectedly disconnected", correlatorId);
+	// } else if (event.isClosedByClient()) {
+	// logger.info("Browser {} closed the connection", correlatorId);
+	// }
+	// }
 
 	@Override
 	public void destroy() {
@@ -247,41 +278,57 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 	}
 
 	// package-protected for unit testing
-	static String validateAndParseStateValueFromJson(final Reader reader) throws SqrlInvalidDataException, IOException {
+	static JsonObject validateAndParseStateValueFromJson(final String correlator, final Reader reader)
+			throws SqrlInvalidDataException, IOException {
 		final char[] chars = new char[JSON_SIZE_LIMIT+1];
-		if(reader.read(chars) > JSON_SIZE_LIMIT) {
-			throw new SqrlInvalidDataException("Atomsophere json exeeded max size of " + JSON_SIZE_LIMIT);
+		if (reader.read(chars) > JSON_SIZE_LIMIT) {
+			throw new SqrlInvalidDataException(
+					new StringBuilder(1000).append("channel=poll process=atmosPostRecvState cor=").append(correlator)
+					.append(" detail=\"Atomsophere json exeeded max size of ").append(JSON_SIZE_LIMIT)
+					.append("\"").toString());
 		}
-		String shouldBeJson = new String(chars);
+
+		final String shouldBeJson = new String(chars).trim();
+		try {
+			final JsonObject jsonObject = Json.parse(shouldBeJson).asObject();
+			if (jsonObject.get("state") == null || jsonObject.get("correlator") == null) {
+				throw new SqrlInvalidDataException(new StringBuilder(1000).append("channel=poll process=atmosPostRecvState cor=").append(correlator).append(" detail=\"Atomsophere json was invalid\" json=").append(shouldBeJson).toString());
+			}
+			return jsonObject;
+		} catch (final ParseException e) {
+			throw new SqrlInvalidDataException(new StringBuilder(1000).append("channel=poll process=atmosPostRecvState cor=").append(correlator).append(" detail=\"Error parsing atmosphere json\" json=").append(shouldBeJson).toString());
+		}
+		// TODO: delete
 		// Our json is trivial, just parse using index of instead of pulling in a json lib
-		shouldBeJson = shouldBeJson.trim();
-		if(!shouldBeJson.startsWith("{") || !shouldBeJson.endsWith("}")) {
-			throw new SqrlInvalidDataException("Atomsophere json was invalid: " + shouldBeJson);
-		} // TODO: minimal-json
-		shouldBeJson = shouldBeJson.replace("{", "");
-		shouldBeJson = shouldBeJson.replace("}", "");
-		shouldBeJson = shouldBeJson.replace("\"", "");
-		shouldBeJson = shouldBeJson.trim();
-		final int colonIndex = shouldBeJson.lastIndexOf(':');
-		if(colonIndex == -1) {
-			throw new SqrlInvalidDataException("Atomsophere json was missing colon: " + shouldBeJson);
-		}
-		final String[] partArray = shouldBeJson.split(":");
-		// Add tokens should be alphanumeric
-		for (int i = 0; i < partArray.length; i++) {
-			partArray[i] = partArray[i].trim();
-			SqrlSanitize.inspectIncomingSqrlData(partArray[i]);
-		}
-		if (partArray.length != 2) {
-			throw new SqrlInvalidDataException("Atomsophere json had wrong number of parts: " + shouldBeJson);
-		} else if (!JSON_TAG_NAME.equals(partArray[0].trim())) {
-			throw new SqrlInvalidDataException("Atomsophere json was missing expected tag name: " + shouldBeJson);
-		}
-		return partArray[1];
+		// shouldBeJson = shouldBeJson.trim();
+		// if(!shouldBeJson.startsWith("{") || !shouldBeJson.endsWith("}")) {
+		// throw new SqrlInvalidDataException("Atomsophere json was invalid: " + shouldBeJson);
+		// } // TODO: minimal-json
+		// shouldBeJson = shouldBeJson.replace("{", "");
+		// shouldBeJson = shouldBeJson.replace("}", "");
+		// shouldBeJson = shouldBeJson.replace("\"", "");
+		// shouldBeJson = shouldBeJson.trim();
+		// final int colonIndex = shouldBeJson.lastIndexOf(':');
+		// if(colonIndex == -1) {
+		// throw new SqrlInvalidDataException("Atomsophere json was missing colon: " + shouldBeJson);
+		// }
+		// final String[] partArray = shouldBeJson.split(":");
+		// // Add tokens should be alphanumeric
+		// for (int i = 0; i < partArray.length; i++) {
+		// partArray[i] = partArray[i].trim();
+		// SqrlSanitize.inspectIncomingSqrlData(partArray[i]);
+		// }
+		// if (partArray.length != 2) {
+		// throw new SqrlInvalidDataException("Atomsophere json had wrong number of parts: " + shouldBeJson);
+		// } else if (!JSON_TAG_NAME.equals(partArray[0].trim())) {
+		// throw new SqrlInvalidDataException("Atomsophere json was missing expected tag name: " + shouldBeJson);
+		// }
+		// return partArray[1];
 	}
 
 	// package-protected for unit testing
-	static String extractCorrelatorFromCookie(final AtmosphereResource resource) {
+	// TODO: delete
+	static String extractCorrelatorFromCookieOld(final AtmosphereResource resource) {
 		if (resource.getRequest() == null) {
 			logger.error("Couldn't extract correlator from cookie since atmosphere request was null");
 			return null;

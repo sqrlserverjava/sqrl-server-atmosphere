@@ -34,7 +34,7 @@ public class AtmosphereClientSanitizeTest {
 	@Test
 	public void testIt() throws Exception {
 		try (StringReader reader = new StringReader(json)) {
-			AtmosphereClientAuthStateUpdater.validateAndParseStateValueFromJson(reader);
+			AtmosphereClientAuthStateUpdater.validateAndParseStateValueFromJson("xyz", reader);
 			TestCase.assertNotNull("Exception was expected, but none was thrown", expected);
 		} catch (final Exception e) {
 			if (expected != null) {
