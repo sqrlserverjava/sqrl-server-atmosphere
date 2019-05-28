@@ -38,6 +38,7 @@ import com.github.sqrlserverjava.SqrlServerOperations;
 import com.github.sqrlserverjava.enums.SqrlAuthenticationStatus;
 import com.github.sqrlserverjava.exception.SqrlInvalidDataException;
 import com.github.sqrlserverjava.util.SelfExpiringHashMap;
+import com.github.sqrlserverjava.util.SqrlUtil;
 import com.github.sqrlserverjava.util.VersionExtractor;
 import com.github.sqrlserverjava.util.VersionExtractor.Module;
 @AtmosphereHandlerService(path = "/sqrlauthpolling", interceptors = { AtmosphereResourceLifecycleInterceptor.class })
@@ -112,15 +113,19 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			if (request.getMethod().equalsIgnoreCase("GET")) {
 				// GETs are the browser polling for an update; suspend it until we are ready to respond
 				// This is the one place where we don't have access to the correlator
-				resource.suspend();
-				final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.get(correlator);
-				if (newAuthStatus == null) {
-					resource.suspend();
-					updateCurrentAtomosphereRequest(correlator, resource, request.getHeader("User-Agent"));
+				if (SqrlUtil.isBlank(correlator)) {
+					logger.warn(formatForLogging("correlator missing from atmos get header, cannot use resource"));
 				} else {
-					transmitResponseToResource(correlator, resource, newAuthStatus);
-					logger.info(formatForLogging("Immediate response triggered for polling request, sending {}"),
-							newAuthStatus);
+					final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.get(correlator);
+					resource.suspend();
+					if (newAuthStatus == null) {
+						resource.suspend();
+						updateCurrentAtomosphereRequest(correlator, resource, request.getHeader("User-Agent"));
+					} else {
+						transmitResponseToResource(correlator, resource, newAuthStatus);
+						logger.info(formatForLogging("Immediate response triggered for polling request, sending {}"),
+								newAuthStatus);
+					}
 				}
 			} else if (request.getMethod().equalsIgnoreCase("POST")) {
 				// Post means we're being sent data, should be trivial JSON: { "state" : "COMMUNICATING" }
