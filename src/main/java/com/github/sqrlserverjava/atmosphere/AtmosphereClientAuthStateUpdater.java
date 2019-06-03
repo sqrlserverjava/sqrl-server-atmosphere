@@ -207,7 +207,7 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 			case JSONP:
 			case LONG_POLLING:
 			case POLLING: // TODO: is this right?
-				logger.debug(formatForLogging("trying resource.resume() for POLLING"));
+				logger.info(formatForLogging("trying response.resume()for POLLING")); // TODO: remove or debug
 				resource.resume();
 				break;
 			case WEBSOCKET:
@@ -225,7 +225,8 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 				sqrlAuthStateMonitor.stopMonitoringCorrelator(correlatorId);
 			}
 		} catch (final Exception e) {
-			logger.error(formatForLogging("Caught IO error trying to send status of {}"), newAuthStatus, e);
+			logger.error(formatForLogging("Caught IO error trying to send status of {} with transport {}"),
+					newAuthStatus, resource.transport(), e);
 		}
 	}
 
