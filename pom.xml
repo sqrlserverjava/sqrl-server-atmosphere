@@ -24,7 +24,7 @@
 			<!-- https://mvnrepository.com/artifact/org.atmosphere/atmosphere-runtime -->
 			<groupId>org.atmosphere</groupId>
 			<artifactId>atmosphere-runtime</artifactId>
-			<version>2.4.8</version><!--  TODO: bump to latest 2.5.3 -->
+			<version>2.5.3</version>
 		</dependency>
 	</dependencies>
 	
