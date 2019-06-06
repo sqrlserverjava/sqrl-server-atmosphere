@@ -131,10 +131,9 @@ public class AtmosphereClientAuthStateUpdater implements AtmosphereHandler, Sqrl
 				// Post means we're being sent data, should be trivial JSON: { "state" : "COMMUNICATING" }
 				updateCurrentAtomosphereRequest(correlator, resource, request.getHeader("User-Agent"));
 				final SqrlAuthenticationStatus newAuthStatus = stateChangeCache.get(correlator);
-				logger.info("newAuthStatus={}", newAuthStatus);
 				if (newAuthStatus != null) {
 					transmitResponseToResource(correlator, resource, newAuthStatus);
-					logger.info(formatForLogging("Immediate response triggered for polling request, sending {}"),
+					logger.info(formatForLogging("Immediate response triggered for polling request", "newAuthStatus"),
 							newAuthStatus);
 				}
 
